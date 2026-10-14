@@ -1,0 +1,151 @@
+import { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useLocation } from "wouter";
+import { Check, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+interface Plan {
+  id: string;
+  name: string;
+  price: number;
+  credits: number;
+  features: string[];
+}
+
+export default function SubscriptionPage() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  const { data: plans, isLoading: plansLoading } = useQuery<Plan[]>({
+    queryKey: ["/api/subscription/plans"],
+  });
+  const { data: credits, isLoading: creditsLoading } = useQuery<{
+    creditsRemaining: number;
+    hasSubscription: boolean;
+    planType: string | null;
+  }>({ queryKey: ["/api/credits"] });
+  const isLoading = plansLoading || creditsLoading;
+
+  const subscribeMutation = useMutation({
+    mutationFn: async (planType: string) => {
+      const res = await apiRequest("POST", "/api/subscription/subscribe", { planType });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/credits"] });
+      toast({
+        title: credits?.hasSubscription ? "Plan upgraded!" : "Subscription Successful!",
+        description: "Credits have been added to your account.",
+      });
+      setLocation("/profile");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Subscription Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {credits?.hasSubscription && (
+          <div className="mb-6 text-center">
+            <Button variant="ghost" onClick={() => setLocation("/profile")}>← Back to profile builder</Button>
+          </div>
+        )}
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Choose Your Plan</h2>
+          <p className="mt-4 text-lg text-gray-600">Select a subscription to start building your professional profile</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-2 max-w-4xl mx-auto">
+          {plans?.map((plan) => (
+            <Card 
+              key={plan.id} 
+              className={`relative overflow-hidden ${plan.id === 'premium' ? 'border-2 border-primary shadow-lg' : ''}`}
+            >
+              {plan.id === 'premium' && (
+                <div className="absolute top-0 right-0">
+                  <Badge className="bg-primary text-white rounded-none rounded-bl-lg px-3 py-1">
+                    POPULAR
+                  </Badge>
+                </div>
+              )}
+              
+              <CardContent className="p-8">
+                <div className="text-center">
+                  <h3 className="text-2xl font-semibold text-gray-900 mb-4">{plan.name}</h3>
+                  <p className="text-gray-600 mb-8">
+                    {plan.id === 'basic' 
+                      ? 'Perfect for getting started with professional profiles' 
+                      : 'Best value for power users who edit frequently'
+                    }
+                  </p>
+                  
+                  <div className="mb-8">
+                    <div className="flex items-baseline justify-center">
+                      <span className="text-5xl font-bold text-gray-900">
+                        ₹{(plan.price / 100).toLocaleString()}
+                      </span>
+                      <span className="ml-1 text-xl text-gray-500">/ 30 days</span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-500">{plan.credits} credits included</p>
+                  </div>
+
+                  <ul className="text-left space-y-4 mb-8">
+                    {plan.features.map((feature, index) => (
+                      <li key={index} className="flex items-start">
+                        <Check className="h-5 w-5 text-green-600 mt-0.5 mr-3 flex-shrink-0" />
+                        <span className="text-gray-600">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {(() => {
+                    const isCurrent = credits?.planType === plan.name;
+                    // Premium owners can't "downgrade" to Basic; Basic owners can upgrade to Premium.
+                    const isBlocked = !!credits?.hasSubscription && (isCurrent || (credits.planType === "Premium" && plan.name === "Basic"));
+                    return (
+                      <Button
+                        onClick={() => subscribeMutation.mutate(plan.name)}
+                        disabled={subscribeMutation.isPending || isBlocked}
+                        className="w-full"
+                        variant={plan.id === 'premium' ? 'default' : 'outline'}
+                      >
+                        {subscribeMutation.isPending && subscribeMutation.variables === plan.name && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
+                        {isCurrent ? "Current plan" : credits?.hasSubscription && plan.name === "Premium" ? "Upgrade to Premium" : `Select ${plan.name}`}
+                      </Button>
+                    );
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="text-center mt-12">
+          <p className="text-sm text-gray-500">
+            All plans include unlimited PDF exports and profile sharing. Credits are used only for profile edits (5 credits per saved edit).
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
